@@ -34,6 +34,12 @@ python cc_backlinks.py enrich
 # Or pass key directly:
 python cc_backlinks.py enrich --api-key your_key_here
 
+# Enrich with Majestic Million (free, no key needed — downloads ~80 MB CSV)
+python cc_backlinks.py enrich-majestic
+
+# Enrich with Tranco top-1M ranking (free, no key needed)
+python cc_backlinks.py enrich-tranco
+
 # Output as JSON or CSV
 python cc_backlinks.py crawl example.com --json
 python cc_backlinks.py gap mysite.com competitor.com --csv -o gaps.csv
@@ -45,7 +51,8 @@ python cc_backlinks.py crawl example.com --release cc-main-2025-oct-nov-dec
 ## Python API
 
 ```python
-from cc_backlinks import crawl_and_store, get_stored, gap_analysis, list_crawls, enrich_pagerank
+from cc_backlinks import (crawl_and_store, get_stored, gap_analysis, list_crawls,
+                          enrich_pagerank, enrich_majestic, enrich_tranco)
 
 # Crawl + store
 results, crawl_id = crawl_and_store("example.com")
@@ -56,8 +63,10 @@ results = get_stored("example.com")
 # Gap analysis
 gaps = gap_analysis("mysite.com", "competitor.com")
 
-# Enrich all stored domains with PageRank
-count = enrich_pagerank(api_key="your_key_here")
+# Enrich with multiple authority sources
+count = enrich_pagerank(api_key="your_key_here")  # Open PageRank (needs API key)
+count = enrich_majestic()                          # Majestic Million (free)
+count = enrich_tranco()                            # Tranco top-1M (free)
 
 # List crawls
 crawls = list_crawls()
@@ -88,12 +97,14 @@ Common Crawl S3
 ### SQLite Database (`data/backlinks.db`)
 
 ```sql
-crawls(id, target, release, crawled_at, result_count)       -- UNIQUE(target, release)
-backlinks(id, crawl_id, linking_domain, num_hosts, page_rank) -- UNIQUE(crawl_id, linking_domain)
-pagerank_cache(domain, page_rank, fetched_at)                -- PRIMARY KEY(domain)
+crawls(id, target, release, crawled_at, result_count)                    -- UNIQUE(target, release)
+backlinks(id, crawl_id, linking_domain, num_hosts, page_rank)            -- UNIQUE(crawl_id, linking_domain)
+pagerank_cache(domain, page_rank, fetched_at)                            -- PRIMARY KEY(domain)
+majestic_cache(domain, global_rank, tld_rank, ref_subnets, ref_ips, fetched_at) -- PRIMARY KEY(domain)
+tranco_cache(domain, tranco_rank, fetched_at)                            -- PRIMARY KEY(domain)
 ```
 
-The `pagerank_cache` table avoids re-fetching scores for domains already looked up. The `enrich` command only queries uncached domains.
+Cache tables avoid redundant re-downloads. Each enrichment source matches only against domains already in your backlinks table.
 
 Re-crawling the same domain+release replaces previous results.
 
@@ -114,11 +125,22 @@ rm -rf ~/.cache/cc-backlinks/<release>/
 1. **Crawl your site:** `python cc_backlinks.py crawl mysite.com`
 2. **Crawl competitors:** `python cc_backlinks.py crawl competitor1.com`
 3. **Find gaps:** `python cc_backlinks.py gap mysite.com competitor1.com --csv -o gaps.csv`
-4. **Enrich with PageRank:** `python cc_backlinks.py enrich --api-key YOUR_KEY`
-5. **Prioritize:** Sort by `page_rank` and `num_hosts`, filter for industry relevance
+4. **Enrich with authority data:**
+   ```bash
+   python cc_backlinks.py enrich-majestic   # free, no key
+   python cc_backlinks.py enrich-tranco     # free, no key
+   python cc_backlinks.py enrich --api-key YOUR_KEY  # optional
+   ```
+5. **Prioritize:** Sort by authority metrics, filter for industry relevance
 6. **Outreach:** Target high-authority gap domains for link-building
 
-Get a free Open PageRank API key at https://www.domcop.com/openpagerank/
+## Enrichment Sources
+
+| Source | Command | Data | Cost |
+|--------|---------|------|------|
+| [Majestic Million](https://majestic.com/reports/majestic-million) | `enrich-majestic` | Global rank, Trust Flow subnets, referring IPs | Free, ~80 MB download |
+| [Tranco List](https://tranco-list.eu/) | `enrich-tranco` | Aggregated top-1M rank (Majestic + Chrome UX + Cloudflare Radar) | Free, ~7 MB download |
+| [Open PageRank](https://www.domcop.com/openpagerank/) | `enrich` | PageRank score (0–10) | Free API key required |
 
 ## Data Freshness
 
@@ -139,12 +161,15 @@ This tool was hardened from [retlehs/cf0ac6c74476e766fba2f14076fff501](https://g
 | Arbitrary domain input | Regex whitelist + 253 char limit |
 | DuckDB file read/write | No user-controlled SQL |
 | Download source | Hardcoded `data.commoncrawl.org` (HTTPS) |
+| Majestic download | HTTPS + CSV header validation |
+| Tranco download | HTTPS + zip integrity check + size validation |
 
 ## Dependencies
 
 - Python 3.10+
 - [DuckDB](https://duckdb.org/) (`pip install duckdb`)
 - [Open PageRank API key](https://www.domcop.com/openpagerank/) (free, optional — for `enrich` command)
+- Internet connection for `enrich-majestic` (~80 MB) and `enrich-tranco` (~7 MB) — no API keys needed
 
 ## License
 
